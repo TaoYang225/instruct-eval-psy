@@ -4,6 +4,7 @@ import bbh
 import crass
 import drop
 import mmlu
+import psy
 from human_eval.main import main as humaneval
 from lm_eval import evaluator
 
@@ -15,6 +16,7 @@ def main(task_name: str, **kwargs):
         drop=drop.main,
         humaneval=humaneval,
         crass=crass.main,
+        psy = psy.main,
     )
 
     if task_name == "all":
