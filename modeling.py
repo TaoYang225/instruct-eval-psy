@@ -22,6 +22,7 @@ from transformers import (
     PreTrainedTokenizer,
     AutoModelForSeq2SeqLM,
     AutoModelForCausalLM,
+    AutoConfig,
     LlamaForCausalLM,
     LlamaTokenizer,
     AutoModel,
@@ -139,20 +140,34 @@ class SeqToSeqModel(EvalModel):
     tokenizer: Optional[PreTrainedTokenizer]
     lora_path: str = ""
     device: str = "cuda"
+    no_split: str = ""
     load_8bit: bool = False
     do_sample: bool = False
-    device_map: str = ""
+    model_para: bool = False
 
     def load(self):
         if self.model is None:
             args = {}
             if self.load_8bit:
                 args.update(device_map="auto", load_in_8bit=True)
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(self.model_path, **args)
+                self.model = AutoModelForSeq2SeqLM.from_pretrained(self.model_path, **args)
+            elif self.model_para:
+                config = AutoConfig.from_pretrained(self.model_path)
+                with init_empty_weights():
+                    self.model = AutoModelForSeq2SeqLM.from_config(config)
+                self.model = load_checkpoint_and_dispatch(
+                        self.model, 
+                        self.model_path, 
+                        device_map="auto", 
+                        offload_folder=None, 
+                        no_split_module_classes=self.no_split.split()
+                        )
+            else:
+                self.model = AutoModelForSeq2SeqLM.from_pretrained(self.model_path)
             if self.lora_path:
                 self.model = PeftModel.from_pretrained(self.model, self.lora_path)
             self.model.eval()
-            if not self.load_8bit:
+            if not self.load_8bit and not self.model_para:
                 self.model.to(self.device)
         if self.tokenizer is None:
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
@@ -197,11 +212,24 @@ class CausalModel(SeqToSeqModel):
             args = {}
             if self.load_8bit:
                 args.update(device_map="auto", load_in_8bit=True)
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_path, trust_remote_code=True, **args
-            )
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    self.model_path, trust_remote_code=True, **args
+                )
+            elif self.model_para:
+                config = AutoConfig.from_pretrained(self.model_path)
+                with init_empty_weights():
+                    self.model = AutoModelForCausalLM.from_config(config)
+                self.model = load_checkpoint_and_dispatch(
+                    self.model, 
+                    self.model_path, 
+                    device_map="auto", 
+                    offload_folder=None, 
+                    no_split_module_classes=self.no_split.split()
+                    )
+            else:
+                self.model = AutoModelForCausalLM.from_pretrained(self.model_path)
             self.model.eval()
-            if not self.load_8bit:
+            if not self.load_8bit and not self.model_para:
                 self.model.to(self.device)
         if self.tokenizer is None:
             self.tokenizer = AutoTokenizer.from_pretrained(
@@ -253,36 +281,26 @@ class LlamaModel(SeqToSeqModel):
         if self.model is None:
             args = {}
             if self.load_8bit:
-                args.update(load_in_8bit=True)
-            if self.device_map is not None:
-                args.update(device_map=self.device_map)
-            # self.model = LlamaForCausalLM.from_pretrained(self.model_path, **args)
-            config = LlamaConfig.from_pretrained(self.model_path)
-            with init_empty_weights():
-                self.model = LlamaForCausalLM(config=config)
-            # device_map = infer_auto_device_map(
-            #     self.model,
-            #     no_split_module_classes=["LlamaDecoderLayer"]
-            # ) 
-            # print(device_map)
-            # load_checkpoint_in_model(
-            #     self.model.model, 
-            #     self.model_path, 
-            #     device_map=device_map, 
-            #     offload_folder=None, 
-            #     offload_state_dict=True
-            # )
-            # self.model.tie_weights()
-            # full_model_device_map = {f"model.{k}": v for k, v in device_map.items()}
-            # full_model_device_map["lm_head"] = 0
-            # print(full_model_device_map)
-            # dispatch_model(self.model, device_map=full_model_device_map)
-            self.model = load_checkpoint_and_dispatch(self.model, self.model_path, device_map=self.device_map, offload_folder=None, no_split_module_classes=["LlamaDecoderLayer"])
+                args.update(device_map="auto", load_in_8bit=True)
+                self.model = LlamaForCausalLM.from_pretrained(self.model_path, **args)
+            elif self.model_para:
+                config = LlamaConfig.from_pretrained(self.model_path)
+                with init_empty_weights():
+                    self.model = LlamaForCausalLM(config=config)
+                self.model = load_checkpoint_and_dispatch(
+                    self.model, 
+                    self.model_path, 
+                    device_map="auto", 
+                    offload_folder=None, 
+                    no_split_module_classes=[self.model.model.layers[0]._get_name()] if self.no_split is "" else self.no_split.split()
+                    )
+            else:
+                self.model = LlamaForCausalLM.from_pretrained(self.model_path)
             if self.lora_path:
                 self.model = PeftModel.from_pretrained(self.model, self.lora_path)
             self.model.eval()
-            # if not self.load_8bit:
-            #     self.model.to(self.device)
+            if not self.load_8bit and not self.model_para:
+                self.model.to(self.device)
 
     def run(self, prompt: str, **kwargs) -> str:
         if self.use_template:
