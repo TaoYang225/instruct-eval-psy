@@ -50,7 +50,7 @@ def gen_prompt_depression(sample, ZeroShot):
     else:
         return task_prompt + rule_prompt + demo_prompt + content_prompt + question_prompt
 
-def evaluate_depression(model: EvalModel, test_data, ZeroShot):
+def evaluate_depression(model: EvalModel, test_data, ZeroShot, task):
     cors = []
     answer = []
 
