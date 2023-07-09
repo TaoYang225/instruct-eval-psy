@@ -50,7 +50,7 @@ def gen_prompt_depression(sample, ZeroShot):
     else:
         return task_prompt + rule_prompt + demo_prompt + content_prompt + question_prompt
 
-def evaluate_depression(model: EvalModel, test_data, ZeroShot, task):
+def evaluate_depression(model: EvalModel, test_data, ZeroShot):
     cors = []
     answer = []
 
@@ -73,7 +73,7 @@ def evaluate_depression(model: EvalModel, test_data, ZeroShot, task):
         cors.append(cor)
         answer.append(pred)
         # print(dict(label=label, pred=pred))
-        print(dict(prompt=prompt, label=label, pred=pred))
+        # print(dict(prompt=prompt, label=label, pred=pred))
 
     acc = np.mean(cors)
     cors = np.array(cors)
@@ -83,16 +83,16 @@ def evaluate_depression(model: EvalModel, test_data, ZeroShot, task):
 
     return cors, acc, answer
 
-def main(data_dir: str = "data/depression", ZeroShot: bool = True, **kwargs):
+def main(task: str = "depression", ZeroShot: bool = True, **kwargs):
     args = Namespace(**locals())
     model = select_model(max_input_length=2048, max_output_length=8, **kwargs)
     print(locals())
 
     all_results = []
-    if 'depression' in data_dir:
-        task = 'depression'
+    if task == 'depression':
+        data_dir = '../data/depression'
         data = read_tsv(data_dir+'/test.tsv')
-        cors, acc, probs = evaluate_depression(model, data, ZeroShot, task)
+        cors, acc, probs = evaluate_depression(model, data, ZeroShot)
         return acc
     # print(result)
 
