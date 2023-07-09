@@ -7,6 +7,7 @@ import csv
 from tqdm import tqdm
 import pandas as pd
 import sacrebleu
+import copy
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 def read_tsv(input_file):
@@ -153,6 +154,60 @@ def evaluate_reframing(model: EvalModel, test_data):
 
     return refs, answer, res.score
 
+def read_csv_empathetic(input_file):
+    data = open(input_file).readlines()
+    data_dic = []
+    cur_id = ''
+    for i in range(1, len(data)):
+        parts = data[i].strip().split(",")
+        if parts[0] != cur_id: # initial
+            cur_id = parts[0]
+            sample = {}
+            sample['conv_id'] = parts[0]
+            sample['dialogue'] = ['User: ' + parts[5].replace("_comma_", ",")]
+        else:
+            if len(sample['dialogue']) % 2 == 1:
+                tmp_s = copy.deepcopy(sample)
+                sample['ref'] = parts[5].replace("_comma_", ",")
+                data_dic.append(sample) # add sample
+                sample = tmp_s
+                sample['dialogue'].append('Assistant: ' + parts[5].replace("_comma_", ","))
+            else:
+                sample['dialogue'].append('User: ' + parts[5].replace("_comma_", ","))
+    return data_dic
+#
+def gen_prompt_empathetic(sample):
+    task_prompt = "As an empathetic AI assistant, you are able to recognize the emotions of your conversation partner and respond accordingly. Your task is to generate empathic responses during your conversations with users.\n"
+    demo_prompt = "For Example:\n" \
+                  "User: I have never cheated on my wife.\n" \
+                  "Assistant: And thats something you should never do, good on you.\n" \
+                  "Let's begin!\n"
+    content_prompt = "{}\nAssistant: ".format('\n'.join(sample['dialogue']))
+    return task_prompt + demo_prompt + content_prompt
+#
+def evaluate_empathetic(model: EvalModel, test_data):
+    refs = []
+    answer = []
+
+    for sample in tqdm(test_data):
+        # get prompt and make sure it fits
+        prompt = gen_prompt_empathetic(sample)
+
+        ref = sample['ref']
+        refs.append(ref)
+        pred = model.run(prompt)
+        pred = pred.split('\n')[0]
+        answer.append(pred)
+        # print(dict(label=label, pred=pred))
+        # print(dict(prompt=prompt, refs=ref, pred=pred))
+
+    res = sacrebleu.corpus_bleu(answer, refs)
+
+    # all_probs = np.array(all_probs)
+    print("BLEU {:.4f} - {}".format(res, 'empathetic'))
+
+    return refs, answer, res
+
 def main(task: str = "depression", ZeroShot: bool = True, **kwargs):
     args = Namespace(**locals())
     print(locals())
@@ -169,6 +224,13 @@ def main(task: str = "depression", ZeroShot: bool = True, **kwargs):
         data = read_csv_reframing(data_dir + '/reframing_dataset.csv')
         model = select_model(max_input_length=2048, max_output_length=60, **kwargs)
         refs, answer, res = evaluate_reframing(model, data)
+        return res
+    if task == 'empathetic':
+        data_dir = '../data/empathetic'
+        data = read_csv_empathetic(data_dir + '/test.csv')
+        model = select_model(max_input_length=2048, max_output_length=60, **kwargs)
+        refs, answer, res = evaluate_empathetic(model, data)
+        return res
     # print(result)
 
 #
