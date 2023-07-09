@@ -5,9 +5,11 @@ from modeling import select_model, EvalModel
 import numpy as np
 import csv
 from tqdm import tqdm
+import pandas as pd
+import sacrebleu
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-def read_tsv(input_file, quotechar=None):
+def read_tsv(input_file):
     """Reads a tab separated value file."""
     with open(input_file, "r", encoding='utf-8') as f:
         reader = csv.reader(f, delimiter="\t", quotechar="\t")
@@ -26,6 +28,25 @@ def read_tsv(input_file, quotechar=None):
                 else:
                     sample['context'].append(line)
         return data
+
+# def read_csv_reframing(input_file):
+#     data = pd.read_csv(input_file)
+#     situation = list(data['situation'])
+#     thought = list(data['thought'])
+#     reframe = list(data['reframe'])
+#     data_dic = []
+#     sample = {}
+#     for i in range(len(data)):
+#         if sample.get('situation') == None:
+#             sample['situation'] = situation[i]
+#             sample['thought'] = thought[i]
+#             sample['reframe1'] = reframe[i]
+#         else:
+#             assert situation[i] == sample['situation']
+#             sample['reframe2'] = reframe[i]
+#             data_dic.append(sample)
+#             sample = {}
+#     return data_dic
 
 def gen_prompt_depression(sample, ZeroShot):
     task_prompt = "You need to annotate users' level of depression based on their posts. There are three labels: Not depressed, Moderate, and Severe.\n"
@@ -83,17 +104,71 @@ def evaluate_depression(model: EvalModel, test_data, ZeroShot):
 
     return cors, acc, answer
 
+def read_csv_reframing(input_file):
+    data = pd.read_csv(input_file)
+    data_dic = []
+    sample = {}
+    for i in range(len(data)):
+        sample['situation'] = data['situation'].iloc[i]
+        sample['thought'] = data['thought'].iloc[i]
+        sample['reframe'] = data['reframe'].iloc[i]
+        sample['thinking_traps'] = data['thinking_traps_addressed'].iloc[i]
+        data_dic.append(sample)
+        sample = {}
+    return data_dic
+#
+def gen_prompt_reframing(sample):
+    task_prompt = "You need to conduct a Cognitive Reframing task, which involves replacing a negative thought with a more hopeful \"reframed thought\" that offers an alternative perspective on one's situation.\n"
+    rule_prompt = "The inputs for this task are: The given Situation; The Negative Thought; The Thinking Traps that need to be addressed. The output of this task is the Reframed Thought. \n"
+    demo_prompt = "For Example: \n" \
+                  "Situation: A Roomate of mine stole my comptuer.\n" \
+                  "Negative Thought: Someone I trusted stole something valuable of mine, I was extremely angry and wanted justice.\n" \
+                  "Thinking Traps: emotional reasoning\n" \
+                  "Reframed Thought: My roommate stole something of mine, and I will focus on actionable solutions to address this.\n" \
+                  "Let's begin!\n"
+    content_prompt = "Situation: {}\nNegative Thought:{}\nThinking Traps:{}\nReframed Thought:".format(sample['situation'], sample['thought'], sample['thinking_traps'])
+
+    return task_prompt + rule_prompt + demo_prompt + content_prompt
+#
+def evaluate_reframing(model: EvalModel, test_data):
+    refs = []
+    answer = []
+
+    for sample in tqdm(test_data):
+        # get prompt and make sure it fits
+        prompt = gen_prompt_reframing(sample)
+
+        ref = sample['reframe']
+        refs.append(ref)
+        pred = model.run(prompt)
+        pred = pred.split('\n')[0]
+        answer.append(pred)
+        # print(dict(label=label, pred=pred))
+        # print(dict(prompt=prompt, refs=ref, pred=pred))
+
+    res = sacrebleu.corpus_bleu(answer, refs)
+
+    # all_probs = np.array(all_probs)
+    print("BLEU {:.4f} - {}".format(res.score, 'reframing'))
+
+    return refs, answer, res.score
+
 def main(task: str = "depression", ZeroShot: bool = True, **kwargs):
     args = Namespace(**locals())
-    model = select_model(max_input_length=2048, max_output_length=8, **kwargs)
     print(locals())
 
     all_results = []
     if task == 'depression':
         data_dir = '../data/depression'
         data = read_tsv(data_dir+'/test.tsv')
+        model = select_model(max_input_length=2048, max_output_length=8, **kwargs)
         cors, acc, probs = evaluate_depression(model, data, ZeroShot)
         return acc
+    if task == 'reframing':
+        data_dir = '../data/reframing'
+        data = read_csv_reframing(data_dir + '/reframing_dataset.csv')
+        model = select_model(max_input_length=2048, max_output_length=60, **kwargs)
+        refs, answer, res = evaluate_reframing(model, data)
     # print(result)
 
 #
