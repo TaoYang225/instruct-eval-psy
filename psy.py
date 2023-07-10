@@ -204,9 +204,9 @@ def evaluate_empathetic(model: EvalModel, test_data):
     res = sacrebleu.corpus_bleu(answer, refs)
 
     # all_probs = np.array(all_probs)
-    print("BLEU {:.4f} - {}".format(res, 'empathetic'))
+    print("BLEU {:.4f} - {}".format(res.score, 'empathetic'))
 
-    return refs, answer, res
+    return refs, answer, res.score
 
 def main(task: str = "depression", ZeroShot: bool = True, **kwargs):
     args = Namespace(**locals())
