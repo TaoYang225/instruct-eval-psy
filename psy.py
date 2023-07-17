@@ -9,12 +9,12 @@ from tqdm import tqdm
 import json
 import sacrebleu
 from sklearn.metrics import f1_score, accuracy_score
-from psy_eval import empathetic, depression, reframing
+from psy_eval import empathetic, depression, reframing, mental, stress
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-def acc_f1(preds, annos):
+def acc_f1(preds, annos, average='macro'):
     acc = accuracy_score(y_true = annos, y_pred = preds)
-    f1 = f1_score(y_true = annos, y_pred = preds, average='macro')
+    f1 = f1_score(y_true = annos, y_pred = preds, average=average)
     return acc, f1
 
 def evaluate_depression(model: EvalModel, test_data, save_path):
@@ -22,6 +22,7 @@ def evaluate_depression(model: EvalModel, test_data, save_path):
     preds, annos = [], []
     results = []
     label_map = {'not depression': 0, 'moderate': 1, 'severe': 2}
+    start = True
     for sample in tqdm(test_data):
         # get prompt and make sure it fits
         prompt = depression.gen_prompt(sample['context'])
@@ -50,7 +51,9 @@ def evaluate_depression(model: EvalModel, test_data, save_path):
             cor = label in pred
         cors.append(cor)
         # print(dict(label=label, pred=pred))
-        # print(dict(prompt=prompt, label=label, pred=pred))
+        if start:
+            print(dict(prompt=prompt, label=label, pred=pred))
+            start = False
         results.append(dict(sample=sample['context'], prompt=prompt, label=label, pred=pred))
 
     acc = np.mean(cors)
@@ -62,11 +65,51 @@ def evaluate_depression(model: EvalModel, test_data, save_path):
         json.dump(results, fp)
     return cors, acc, preds
 
+def evaluate_stress(model: EvalModel, test_data, save_path):
+    cors = []
+    preds, annos = [], []
+    results = []
+    # label_map = {'0': 0, '1': 1}
+    start = True
+    for sample in tqdm(test_data):
+        # get prompt and make sure it fits
+        prompt = stress.gen_prompt(sample['text'])
+
+        label = sample['label']
+        pred = model.run(prompt)
+        pred = pred.strip().lower()
+        # probs = [0 for _ in get_choices()]
+        annos.append(label)
+        if '0' in pred:
+            preds.append(0)
+        elif '1' in pred:
+            preds.append(1)
+        else:
+            preds.append(random.choice([0,1]))
+
+        cor = str(label) in pred
+        cors.append(cor)
+        # print(dict(label=label, pred=pred))
+        if start:
+            print(dict(prompt=prompt, label=label, pred=pred))
+            start = False
+        results.append(dict(sample=sample['text'], prompt=prompt, label=str(label), pred=pred))
+
+    acc = np.mean(cors)
+    # print(preds, annos)
+    acc2, f1 = acc_f1(preds, annos, average='binary')
+
+    print(dict(acc1 = acc, acc2 = acc2, macro_f1 = f1))
+    with open(save_path, 'w') as fp:
+        json.dump(results, fp)
+    return cors, acc, preds
+
 def evaluate_reframing(model: EvalModel, test_data, save_path):
     refs = []
     answer = []
     results = []
-    for sample in tqdm(test_data):
+    start = True
+    for sample in tqdm(test_data[1:]):
         # get prompt and make sure it fits
         prompt = reframing.gen_prompt(sample)
 
@@ -76,7 +119,9 @@ def evaluate_reframing(model: EvalModel, test_data, save_path):
         pred = pred.split('\n')[0]
         answer.append(pred)
         # print(dict(label=label, pred=pred))
-        # print(dict(prompt=prompt, refs=ref, pred=pred))
+        if start:
+            print(dict(prompt=prompt, refs=ref, pred=pred))
+            start = False
         sample['prompt'] = prompt
         sample['pred'] = pred
         results.append(sample)
@@ -93,6 +138,7 @@ def evaluate_empathetic(model: EvalModel, test_data, save_path):
     refs = []
     answer = []
     results = []
+    start = False
     for sample in tqdm(test_data):
         # get prompt and make sure it fits
         prompt = empathetic.gen_prompt(sample)
@@ -103,7 +149,9 @@ def evaluate_empathetic(model: EvalModel, test_data, save_path):
         pred = pred.split('\n')[0]
         answer.append(pred)
         # print(dict(label=label, pred=pred))
-        # print(dict(prompt=prompt, refs=ref, pred=pred))
+        if start:
+            print(dict(prompt=prompt, refs=ref, pred=pred))
+            start = False
         sample['prompt'] = prompt
         sample['pred'] = pred
         results.append(sample)
@@ -112,6 +160,36 @@ def evaluate_empathetic(model: EvalModel, test_data, save_path):
 
     # all_probs = np.array(all_probs)
     print("BLEU {:.4f} - {}".format(res.score, 'empathetic'))
+    with open(save_path, 'w') as fp:
+        json.dump(results, fp)
+    return refs, answer, res.score
+
+def evaluate_mental(model: EvalModel, test_data, save_path):
+    refs = []
+    answer = []
+    results = []
+    start = True
+    for sample in tqdm(test_data):
+        # get prompt and make sure it fits
+        prompt = mental.gen_prompt(sample)
+
+        ref = sample['answers']
+        refs.append(ref)
+        pred = model.run(prompt)
+        pred = pred.strip().split('USER:')[0]
+        answer.append(pred)
+        # print(dict(label=label, pred=pred))
+        if start:
+            print(dict(prompt=prompt, refs=ref, pred=pred))
+            start = False
+        sample['prompt'] = prompt
+        sample['pred'] = pred
+        results.append(sample)
+
+    res = sacrebleu.corpus_bleu(answer, refs)
+
+    print("BLEU {:.4f} - {}".format(res.score, 'Mental Health FAQ'))
+
     with open(save_path, 'w') as fp:
         json.dump(results, fp)
     return refs, answer, res.score
@@ -128,11 +206,23 @@ def main(task: str = "depression", save_path: str = './psy_eval/results/depressi
         model = select_model(max_input_length=2048, max_output_length=8, **kwargs)
         cors, acc, probs = evaluate_depression(model, data, save_path)
         return acc
+    if task == 'stress':
+        data_dir = '../data/stress'
+        data = stress.read_data(data_dir+'/test.pkl')
+        model = select_model(max_input_length=2048, max_output_length=5, **kwargs)
+        cors, acc, probs = evaluate_stress(model, data, save_path)
+        return acc
     if task == 'reframing':
         data_dir = '../data/reframing'
         data = reframing.read_data(data_dir + '/reframing_dataset.csv')
         model = select_model(max_input_length=2048, max_output_length=60, **kwargs)
         refs, answer, res = evaluate_reframing(model, data, save_path)
+        return res
+    if task == 'mental':
+        data_dir = '../data/mh_faq'
+        data = mental.read_data(data_dir + '/Mental_Health_FAQ.csv')
+        model = select_model(max_input_length=200, max_output_length=500, **kwargs)
+        refs, answer, res = evaluate_mental(model, data, save_path)
         return res
     if task == 'empathetic':
         data_dir = '../data/empathetic'
