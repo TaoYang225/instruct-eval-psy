@@ -216,18 +216,18 @@ class CausalModel(SeqToSeqModel):
                     self.model_path, trust_remote_code=True, **args
                 )
             elif self.model_para:
-                config = AutoConfig.from_pretrained(self.model_path)
+                config = AutoConfig.from_pretrained(self.model_path, trust_remote_code=True)
                 with init_empty_weights():
-                    self.model = AutoModelForCausalLM.from_config(config)
+                    self.model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
                 self.model = load_checkpoint_and_dispatch(
                     self.model, 
                     self.model_path, 
                     device_map="auto", 
-                    offload_folder=None, 
+                    offload_folder=None,
                     no_split_module_classes=self.no_split.split()
                     )
             else:
-                self.model = AutoModelForCausalLM.from_pretrained(self.model_path)
+                self.model = AutoModelForCausalLM.from_pretrained(self.model_path, trust_remote_code=True)
             self.model.eval()
             if not self.load_8bit and not self.model_para:
                 self.model.to(self.device)

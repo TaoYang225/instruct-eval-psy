@@ -9,7 +9,7 @@ from tqdm import tqdm
 import json
 import sacrebleu
 from sklearn.metrics import f1_score, accuracy_score
-from psy_eval import empathetic, depression, reframing, mental, stress
+from psy_eval import empathetic, depression, reframing, mental, stress, irf
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 def acc_f1(preds, annos, average='macro'):
@@ -34,7 +34,7 @@ def evaluate_depression(model: EvalModel, test_data, save_path):
 
         label = sample['label']
         pred = model.run(prompt)
-        pred = pred.strip().lower()
+        pred = pred.strip().lower().split('\n')[0]
         # probs = [0 for _ in get_choices()]
         annos.append(label_map[label])
         if 'not depress' in pred:
@@ -103,6 +103,63 @@ def evaluate_stress(model: EvalModel, test_data, save_path):
     with open(save_path, 'w') as fp:
         json.dump(results, fp)
     return cors, acc, preds
+
+def evaluate_irf(model: EvalModel, test_data, save_path):
+    cors_tbe, cors_pbu = [], []
+    preds_tbe, annos_tbe, preds_pbu, annos_pbu = [], [], [], []
+    results = []
+    # label_map = {'0': 0, '1': 1}
+    start = True
+    for sample in tqdm(test_data):
+        # get prompt and make sure it fits
+        prompt_tbe = irf.gen_prompt_TBE(sample)
+        prompt_pbu = irf.gen_prompt_PBU(sample)
+
+        label_tbe = sample['TBE']
+        label_pbu = sample['PBU']
+        pred_tbe = model.run(prompt_tbe)
+        pred_pbu = model.run(prompt_pbu)
+
+        pred_tbe = pred_tbe.strip().lower()
+        pred_pbu = pred_pbu.strip().lower()
+        # probs = [0 for _ in get_choices()]
+        annos_tbe.append(label_tbe)
+        annos_pbu.append(label_pbu)
+        if '0' in pred_tbe:
+            preds_tbe.append(0)
+        elif '1' in pred_tbe:
+            preds_tbe.append(1)
+        else:
+            preds_tbe.append(random.choice([0,1]))
+
+        if '0' in pred_pbu:
+            preds_pbu.append(0)
+        elif '1' in pred_pbu:
+            preds_pbu.append(1)
+        else:
+            preds_pbu.append(random.choice([0,1]))
+
+        cor_tbe = str(label_tbe) in pred_tbe
+        cors_tbe.append(cor_tbe)
+        cor_pbu = str(label_pbu) in pred_pbu
+        cors_pbu.append(cor_pbu)
+        # print(dict(label=label, pred=pred))
+        if start:
+            print(dict(prompt_tbe=prompt_tbe, prompt_pbu=prompt_pbu, label_tbe=label_tbe, pred_tbe=pred_tbe, label_pbu=label_pbu, pred_pbu=pred_pbu))
+            start = False
+        results.append(dict(sample=sample['context'], prompt_tbe=prompt_tbe, prompt_pbu=prompt_pbu, label_tbe=str(label_tbe), pred_tbe=pred_tbe, label_pbu=str(label_pbu), pred_pbu=pred_pbu))
+
+    acc_tbe = np.mean(cors_tbe)
+    acc_pbu = np.mean(cors_pbu)
+    # print(preds, annos)
+    acc2_tbe, f1_tbe = acc_f1(preds_tbe, annos_tbe, average='binary')
+    acc2_pbu, f1_pbu = acc_f1(preds_pbu, annos_pbu, average='binary')
+
+    print(dict(acc1_tbe = acc_tbe, acc2_tbe = acc2_tbe, macro_f1 = f1_tbe))
+    print(dict(acc1_pbu = acc_pbu, acc2_pbu = acc2_pbu, macro_f1 = f1_pbu))
+    with open(save_path, 'w') as fp:
+        json.dump(results, fp)
+    return cors_pbu, acc_pbu, preds_pbu
 
 def evaluate_reframing(model: EvalModel, test_data, save_path):
     refs = []
@@ -211,6 +268,12 @@ def main(task: str = "depression", save_path: str = './psy_eval/results/depressi
         data = stress.read_data(data_dir+'/test.pkl')
         model = select_model(max_input_length=2048, max_output_length=5, **kwargs)
         cors, acc, probs = evaluate_stress(model, data, save_path)
+        return acc
+    if task == 'IRF':
+        data_dir = '../data/IRF'
+        data = irf.read_data(data_dir+'/test_data.csv')
+        model = select_model(max_input_length=2048, max_output_length=5, **kwargs)
+        cors, acc, probs = evaluate_irf(model, data, save_path)
         return acc
     if task == 'reframing':
         data_dir = '../data/reframing'
